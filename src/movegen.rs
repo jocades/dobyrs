@@ -1,4 +1,4 @@
-use crate::attacks::{bishop_attacks, king_attacks, knight_attacks, rook_attacks};
+use crate::attacks::{bishop_attacks, king_attacks, knight_attacks, pawn_attacks, rook_attacks};
 use crate::bitboard::Bitboard;
 use crate::board::Color;
 use crate::board::{
@@ -38,7 +38,8 @@ const RANK_6: u64 = 0xff0000000000;
 const RANK_7: u64 = 0xff000000000000;
 const RANK_8: u64 = 0xff00000000000000;
 
-pub fn generate(b: &Board) -> Array<Move, 256> {
+#[inline]
+pub(crate) fn generate(b: &Board) -> Array<Move, 256> {
     let mut moves = Array::new();
 
     let not_us = !b.occupancy[b.side]; // empty | enemy
@@ -122,6 +123,23 @@ pub fn generate(b: &Board) -> Array<Move, 256> {
     }
 
     if b.side.is_white() {
+        // use mask to check if squares between king and rook are empty and not attacked
+        // let king_side_squares = Bitboard::from(Square::F1) | Bitboard::from(Square::G1);
+        // if b.castle.0
+        //     && (king_side_squares & occupied).is_empty()
+        //     && !is_attacked(b, Square::F1, Black)
+        //     && !is_attacked(b, Square::G1, Black)
+        // {
+        //     moves.push(Move {
+        //         src: Square::E1,
+        //         dst: Square::G1,
+        //         mov: Piece::new(White, King),
+        //         cap: None,
+        //         promo: None,
+        //         kind: Kind::Castle,
+        //     })
+        // }
+
         if b.castle.0
             && b.squares[Square::F1].is_none()
             && b.squares[Square::G1].is_none()
@@ -289,6 +307,20 @@ pub fn gen_pawn_moves(b: &Board, moves: &mut Array<Move, 256>, occupied: Bitboar
         let src = dst.offset(-dir.offset());
         push_promos(moves, src, dst, side, b.squares[dst]);
     }
+
+    if let Some(epsq) = b.epsq {
+        let candidates = pawn_attacks(!side, epsq) & pawns;
+        for src in candidates {
+            moves.push(Move {
+                src,
+                dst: epsq,
+                mov: Piece::new(side, Pawn),
+                cap: Some(Piece::new(!side, Pawn)),
+                promo: None,
+                kind: Kind::EnPassant,
+            })
+        }
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -363,9 +395,7 @@ impl<T, const N: usize> Array<T, N> {
         if self.count == 0 {
             return None;
         }
-
         self.count -= 1;
-
         unsafe { Some(self.data[self.count].assume_init_read()) }
     }
 
@@ -382,5 +412,40 @@ impl<T, const N: usize> std::ops::Deref for Array<T, N> {
 
     fn deref(&self) -> &Self::Target {
         unsafe { std::slice::from_raw_parts(self.data.as_ptr() as *const T, self.count) }
+    }
+}
+
+pub struct IntoIter<T, const N: usize> {
+    array: Array<T, N>,
+    index: usize,
+}
+
+impl<T, const N: usize> Iterator for IntoIter<T, N> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index >= self.array.count {
+            return None;
+        }
+        let item = unsafe { self.array.data[self.index].assume_init_read() };
+        self.index += 1;
+        Some(item)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.array.count - self.index;
+        (len, Some(len))
+    }
+}
+
+impl<T, const N: usize> IntoIterator for Array<T, N> {
+    type Item = T;
+    type IntoIter = IntoIter<T, N>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        IntoIter {
+            array: self,
+            index: 0,
+        }
     }
 }

@@ -114,6 +114,45 @@ impl Board {
 
         Some(this)
     }
+
+    pub fn check(&self) {
+        for (color, role) in Piece::ALL {
+            for sq in self.bitboards[color][role] {
+                assert_eq!(self.squares[sq], Some(Piece::new(color, role)));
+                assert!(self.occupancy[color].contains(sq));
+            }
+        }
+
+        let occupied = self.occupancy[Color::White] | self.occupancy[Color::Black];
+        for sq in (0..64).map(Square::new) {
+            if let Some(p) = self.squares[sq] {
+                assert!(self.bitboards[p].contains(sq));
+                assert!(self.occupancy[p.color()].contains(sq));
+                assert!(!self.occupancy[p.color().other()].contains(sq));
+                assert!(occupied.contains(sq));
+            } else {
+                assert!(!occupied.contains(sq))
+            }
+        }
+
+        assert_eq!(self.bitboards[Color::White][Role::King].count(), 1);
+        assert_eq!(self.bitboards[Color::Black][Role::King].count(), 1);
+    }
+
+    #[inline(always)]
+    pub fn generate(&self) -> Array<Move, 256> {
+        crate::movegen::generate(self)
+    }
+
+    #[inline(always)]
+    pub fn make(&mut self, m: Move) -> bool {
+        crate::make::make(self, m)
+    }
+
+    #[inline(always)]
+    pub fn take(&mut self) {
+        crate::make::take(self)
+    }
 }
 
 impl std::fmt::Display for Board {
@@ -124,26 +163,18 @@ impl std::fmt::Display for Board {
             for x in 0..8 {
                 let sq = Square::from_coords(x, y);
                 let mut piece = None;
-                for color in Color::ALL {
-                    for role in Role::ALL {
-                        if self.bitboards[color][role].contains(sq) {
-                            piece = Some(Piece::new(color, role));
-                            break;
-                        }
-                    }
-                    if piece.is_some() {
+                for (color, role) in Piece::ALL {
+                    if self.bitboards[color][role].contains(sq) {
+                        piece = Some(Piece::new(color, role));
                         break;
                     }
                 }
-
                 f.write_char(piece.map(Piece::char).unwrap_or('·'))?;
-                // f.write_char(self.squares[sq].map(Piece::char).unwrap_or('·'))?;
                 f.write_char(if x < 7 { ' ' } else { '\n' })?;
             }
         }
-        f.write_str("  ")?;
-        (0..8).for_each(|x| _ = write!(f, "{} ", char::from(b'a' + x)));
-        writeln!(f, "\n\nside: {:?}", self.side)?;
+        f.write_str("  a b c d e f g h\n\n")?;
+        writeln!(f, "side: {:?}", self.side)?;
         writeln!(f, "epsq: {:?}", self.epsq)?;
         Ok(())
     }
@@ -184,18 +215,25 @@ impl Square {
     }
 }
 
+impl std::fmt::Display for Square {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(ALGEBRAIC[*self])
+    }
+}
+
 #[derive(Debug)]
 pub struct BySquare<T>([T; 64]);
 
 impl<T> Index<Square> for BySquare<T> {
     type Output = T;
-
+    #[inline(always)]
     fn index(&self, sq: Square) -> &Self::Output {
         &self.0[sq as usize]
     }
 }
 
 impl<T> IndexMut<Square> for BySquare<T> {
+    #[inline(always)]
     fn index_mut(&mut self, sq: Square) -> &mut Self::Output {
         &mut self.0[sq as usize]
     }
@@ -241,13 +279,8 @@ impl std::ops::Not for Color {
 #[derive(Debug)]
 pub struct ByColor<T>([T; 2]);
 
-impl<T> ByColor<T> {
-    pub const fn new(white: T, black: T) -> Self {
-        Self([black, white])
-    }
-}
-
 impl<T> IndexMut<Color> for ByColor<T> {
+    #[inline(always)]
     fn index_mut(&mut self, color: Color) -> &mut Self::Output {
         &mut self.0[color as usize]
     }
@@ -255,7 +288,7 @@ impl<T> IndexMut<Color> for ByColor<T> {
 
 impl<T> Index<Color> for ByColor<T> {
     type Output = T;
-
+    #[inline(always)]
     fn index(&self, color: Color) -> &Self::Output {
         &self.0[color as usize]
     }
@@ -299,13 +332,14 @@ pub struct ByRole<T>([T; 6]);
 
 impl<T> Index<Role> for ByRole<T> {
     type Output = T;
-
+    #[inline(always)]
     fn index(&self, role: Role) -> &Self::Output {
         &self.0[role as usize]
     }
 }
 
 impl<T> IndexMut<Role> for ByRole<T> {
+    #[inline(always)]
     fn index_mut(&mut self, role: Role) -> &mut Self::Output {
         &mut self.0[role as usize]
     }
@@ -313,7 +347,7 @@ impl<T> IndexMut<Role> for ByRole<T> {
 
 /// 0001 -> color
 /// 1110 -> role
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct Piece(u8);
 
@@ -345,6 +379,21 @@ impl Piece {
             Color::White => ch.to_ascii_uppercase(),
         }
     }
+
+    pub const ALL: [(Color, Role); 12] = [
+        (Color::White, Role::Pawn),
+        (Color::White, Role::Knight),
+        (Color::White, Role::Bishop),
+        (Color::White, Role::Rook),
+        (Color::White, Role::Queen),
+        (Color::White, Role::King),
+        (Color::Black, Role::Pawn),
+        (Color::Black, Role::Knight),
+        (Color::Black, Role::Bishop),
+        (Color::Black, Role::Rook),
+        (Color::Black, Role::Queen),
+        (Color::Black, Role::King),
+    ];
 }
 
 impl std::fmt::Debug for Piece {
@@ -361,13 +410,14 @@ pub struct ByPiece<T>(pub ByColor<ByRole<T>>);
 
 impl<T> Index<Piece> for ByPiece<T> {
     type Output = T;
-
+    #[inline(always)]
     fn index(&self, p: Piece) -> &Self::Output {
         &self.0[p.color()][p.role()]
     }
 }
 
 impl<T> IndexMut<Piece> for ByPiece<T> {
+    #[inline(always)]
     fn index_mut(&mut self, p: Piece) -> &mut Self::Output {
         &mut self.0[p.color()][p.role()]
     }
@@ -375,13 +425,14 @@ impl<T> IndexMut<Piece> for ByPiece<T> {
 
 impl<T> Index<Color> for ByPiece<T> {
     type Output = ByRole<T>;
-
+    #[inline(always)]
     fn index(&self, color: Color) -> &Self::Output {
         &self.0[color]
     }
 }
 
 impl<T> IndexMut<Color> for ByPiece<T> {
+    #[inline(always)]
     fn index_mut(&mut self, color: Color) -> &mut Self::Output {
         &mut self.0[color]
     }

@@ -5,17 +5,15 @@ use crate::{
 };
 
 pub fn make(b: &mut Board, m: Move) -> bool {
-    // println!("MAKE {m:?}");
     b.history.push(Undo { m, epsq: b.epsq });
 
-    b.bitboards[m.mov].clrbit(m.src);
-    b.bitboards[m.mov].setbit(m.dst);
-
-    b.occupancy[b.side].clrbit(m.src);
-    b.occupancy[b.side].setbit(m.dst);
+    b.bitboards[m.mov].movbit(m.src, m.dst);
+    b.occupancy[b.side].movbit(m.src, m.dst);
 
     b.squares[m.src] = None;
     b.squares[m.dst] = Some(m.mov);
+
+    b.epsq = None;
 
     match m.kind {
         Kind::Normal => {
@@ -36,6 +34,7 @@ pub fn make(b: &mut Board, m: Move) -> bool {
             let sq = m.dst.offset(b.side.fold(-8, 8));
             b.bitboards[!b.side][Pawn].clrbit(sq);
             b.occupancy[!b.side].clrbit(sq);
+            b.squares[sq] = None;
         }
         Kind::Castle => todo!(),
     }
@@ -80,6 +79,7 @@ pub fn take(b: &mut Board) {
             let sq = m.dst.offset(b.side.fold(-8, 8));
             b.bitboards[!b.side][Pawn].setbit(sq);
             b.occupancy[!b.side].setbit(sq);
+            b.squares[sq] = Some(Piece::new(!b.side, Pawn));
         }
         Kind::Castle => todo!(),
     }

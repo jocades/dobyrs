@@ -24,6 +24,12 @@ impl Bitboard {
     }
 
     #[inline(always)]
+    pub const fn movbit(&mut self, src: Square, dst: Square) {
+        self.clrbit(src);
+        self.setbit(dst);
+    }
+
+    #[inline(always)]
     pub const fn contains(self, sq: Square) -> bool {
         self.0 & (1 << sq as u8) != 0
     }
@@ -118,15 +124,6 @@ impl<T: Into<Bitboard>> ops::BitXorAssign<T> for Bitboard {
     }
 }
 
-impl<T: Into<Bitboard>> ops::Shl<T> for Bitboard {
-    type Output = Bitboard;
-    #[inline(always)]
-    fn shl(self, rhs: T) -> Self::Output {
-        let Bitboard(rhs) = rhs.into();
-        Bitboard(self.0 << rhs)
-    }
-}
-
 impl ops::Not for Bitboard {
     type Output = Bitboard;
     #[inline(always)]
@@ -172,8 +169,7 @@ impl fmt::Display for Bitboard {
                 f.write_char(if x < 7 { ' ' } else { '\n' })?;
             }
         }
-        f.write_str("  ")?;
-        (0..8).for_each(|x| _ = write!(f, "{} ", char::from(b'a' + x)));
+        f.write_str("  a b c d e f g h\n")?;
         writeln!(f)
     }
 }

@@ -82,9 +82,33 @@ impl Board {
             _ => return None,
         };
 
-        this.epsq = None;
+        let castling_rights = parts.next()?;
+        if castling_rights.len() > 4 {
+            return None;
+        }
 
-        this.castle = 0b1111;
+        if castling_rights[0] == b'-' {
+            this.castle = 0;
+        } else {
+            for &ch in castling_rights {
+                match ch {
+                    b'K' => this.castle |= WKSC,
+                    b'Q' => this.castle |= WQSC,
+                    b'k' => this.castle |= BKSC,
+                    b'q' => this.castle |= BQSC,
+                    _ => return None,
+                }
+            }
+        }
+
+        let epsq = parts.next()?;
+        if epsq[0] == b'-' {
+            this.epsq = None;
+        } else {
+            let x = epsq[0] - b'a';
+            let y = epsq[1] - b'1';
+            this.epsq = Some(Square::from_coords(x, y));
+        }
 
         Some(this)
     }
@@ -131,6 +155,12 @@ impl Board {
     #[inline(always)]
     pub fn unmake(&mut self) {
         crate::make::unmake(self)
+    }
+
+    #[inline(always)]
+    pub fn in_check(&self) -> bool {
+        let king = self.bitboards[self.side][Role::King].first().unwrap();
+        crate::movegen::is_attacked(self, king, !self.side)
     }
 }
 
@@ -181,6 +211,7 @@ impl std::fmt::Display for Board {
         f.write_str("  a b c d e f g h\n\n")?;
         writeln!(f, "side: {:?}", self.side)?;
         writeln!(f, "epsq: {:?}", self.epsq)?;
+        writeln!(f, "castle: {:b}", self.castle)?;
         Ok(())
     }
 }
@@ -214,9 +245,14 @@ impl Square {
     }
 
     #[inline(always)]
-    pub const fn offset(self, delta: i8) -> Square {
+    pub const fn offset(self, delta: i32) -> Square {
         debug_assert!(-64 < delta && delta < 64);
-        unsafe { transmute((self as u8).wrapping_add_signed(delta)) }
+        Square::new((self as u32).wrapping_add_signed(delta))
+    }
+
+    #[inline(always)]
+    pub const fn mirror(self) -> Square {
+        unsafe { transmute(self as u8 ^ 54) }
     }
 }
 
@@ -487,27 +523,30 @@ pub const ALGEBRAIC: BySquare<&'static str> = BySquare([
 
 // impl Default for Board {
 //     fn default() -> Self {
-//         let bitboards = [
-//             [
-//                 // white
-//                 Bitboard(0xff00),
-//                 Bitboard(0x42),
-//                 Bitboard(0x24),
-//                 Bitboard(0x81),
-//                 Bitboard(0x8),
-//                 Bitboard(0x10),
-//             ],
-//             [
-//                 //black
+//         let bitboards = ByColor([
+//             ByRole([
 //                 Bitboard(0xff000000000000),
 //                 Bitboard(0x4200000000000000),
 //                 Bitboard(0x2400000000000000),
 //                 Bitboard(0x8100000000000000),
 //                 Bitboard(0x800000000000000),
 //                 Bitboard(0x1000000000000000),
-//             ],
-//         ];
+//             ]),
+//             ByRole([
+//                 Bitboard(0xff00),
+//                 Bitboard(0x42),
+//                 Bitboard(0x24),
+//                 Bitboard(0x81),
+//                 Bitboard(0x8),
+//                 Bitboard(0x10),
+//             ]),
+//         ]);
 //
-//         todo!()
+//         let occupancy = [Bitboard(0xffff0000000000), Bitboard(0xff)];
+//
+//         Self {
+//             bitboards: ByPiece(bitboards),
+//             occupancy: ByColor(occupancy),
+//         }
 //     }
 // }

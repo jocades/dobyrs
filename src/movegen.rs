@@ -1,5 +1,5 @@
 use crate::attacks::{bishop_attacks, king_attacks, knight_attacks, pawn_attacks, rook_attacks};
-use crate::bitboard::Bitboard;
+use crate::bitboard::{Bitboard, Direction};
 use crate::board::{
     BKSC, BQSC, Board,
     Color::{self, *},
@@ -26,12 +26,6 @@ pub enum Kind {
     EnPassant,
     Castle,
 }
-
-const RANK_1: u64 = 0xff;
-const RANK_2: u64 = 0xff00;
-const RANK_3: u64 = 0xff0000;
-const RANK_6: u64 = 0xff0000000000;
-const RANK_8: u64 = 0xff00000000000000;
 
 #[inline]
 pub(crate) fn generate(b: &Board) -> Array<Move, 256> {
@@ -194,6 +188,8 @@ pub(crate) fn generate(b: &Board) -> Array<Move, 256> {
 
 #[inline]
 pub fn gen_pawn_moves(b: &Board, moves: &mut Array<Move, 256>, occupied: Bitboard) {
+    use crate::bitboard::{BACKRANKS, RANK_3, RANK_6};
+
     #[inline(always)]
     fn push_promos(
         moves: &mut Array<Move, 256>,
@@ -307,6 +303,7 @@ pub fn gen_pawn_moves(b: &Board, moves: &mut Array<Move, 256>, occupied: Bitboar
     }
 }
 
+#[inline]
 #[rustfmt::skip]
 pub fn is_attacked(b: &Board, sq: Square, by_side: Color) -> bool {
     let pawns = b.bitboards[by_side][Pawn];
@@ -327,49 +324,6 @@ pub fn is_attacked(b: &Board, sq: Square, by_side: Color) -> bool {
     if (rook_attacks(sq, occupied) & rooks_queens).any() { return true; }
 
     false
-}
-
-#[derive(Copy, Clone)]
-pub(crate) enum Direction {
-    North,
-    South,
-    NorthWest,
-    NorthEast,
-    SouthWest,
-    SouthEast,
-}
-
-const FILE_A: u64 = 0x0101010101010101;
-const FILE_B: u64 = 0x0202020202020202;
-const FILE_G: u64 = 0x4040404040404040;
-const FILE_H: u64 = 0x8080808080808080;
-
-const BACKRANKS: u64 = RANK_1 | RANK_8;
-
-impl Direction {
-    #[inline(always)]
-    pub const fn offset(self) -> i8 {
-        match self {
-            Direction::North => 8,
-            Direction::South => -8,
-            Direction::NorthWest => 7,
-            Direction::SouthWest => -9,
-            Direction::NorthEast => 9,
-            Direction::SouthEast => -7,
-        }
-    }
-
-    #[inline(always)]
-    pub const fn translate(self, bb: Bitboard) -> Bitboard {
-        Bitboard(match self {
-            Direction::North => bb.0 << 8,
-            Direction::South => bb.0 >> 8,
-            Direction::NorthWest => (bb.0 & !FILE_A) << 7,
-            Direction::SouthWest => (bb.0 & !FILE_A) >> 9,
-            Direction::NorthEast => (bb.0 << 9) & !FILE_A,
-            Direction::SouthEast => (bb.0 >> 7) & !FILE_A,
-        })
-    }
 }
 
 use core::mem::MaybeUninit;

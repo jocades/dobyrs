@@ -2,19 +2,21 @@ use std::io;
 use std::time::Instant;
 
 use doby::board::{Board, Piece};
-use doby::perft;
+use doby::{perft, search::search};
 
 const START_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 const KIWIPETE_FEN: &str = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq";
 
 fn main() -> io::Result<()> {
-    let mut board = Board::from_fen(START_FEN).unwrap();
+    let mut board = Board::from_fen("1k6/4r2Q/5R2/8/8/8/8/6K1 w - - 0 1").unwrap();
+    println!("{}", doby::evaluate::evaluate(&board));
+    // perft::divide(&mut board, 3);
+    println!("{board}");
+    let best_move = search(&mut board, 3);
+    println!("{best_move:?}");
 
-    for depth in 1..=6 {
-        let start = Instant::now();
-        let total = perft::divide(&mut board, depth);
-        println!("Depth {depth}: {total} nodes in {:?}", start.elapsed());
-    }
+    // let score = doby::search::negamax(&mut board, 5);
+    // println!("{score}");
 
     // let depth = 1;
     // let start = Instant::now();

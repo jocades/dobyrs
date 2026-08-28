@@ -70,6 +70,13 @@ impl Bitboard {
     }
 }
 
+pub const RANK_1: u64 = 0xff;
+pub const RANK_3: u64 = 0xff0000;
+pub const RANK_6: u64 = 0xff0000000000;
+pub const RANK_8: u64 = 0xff00000000000000;
+
+pub const BACKRANKS: u64 = RANK_1 | RANK_8;
+
 impl From<u64> for Bitboard {
     #[inline(always)]
     fn from(n: u64) -> Self {
@@ -182,5 +189,46 @@ impl fmt::Display for Bitboard {
         }
         f.write_str("  a b c d e f g h\n")?;
         writeln!(f)
+    }
+}
+
+const FILE_A: u64 = 0x0101010101010101;
+// const FILE_B: u64 = 0x0202020202020202;
+// const FILE_G: u64 = 0x4040404040404040;
+// const FILE_H: u64 = 0x8080808080808080;
+
+#[derive(Copy, Clone)]
+pub(crate) enum Direction {
+    North,
+    South,
+    NorthWest,
+    NorthEast,
+    SouthWest,
+    SouthEast,
+}
+
+impl Direction {
+    #[inline(always)]
+    pub const fn offset(self) -> i32 {
+        match self {
+            Direction::North => 8,
+            Direction::South => -8,
+            Direction::NorthWest => 7,
+            Direction::SouthWest => -9,
+            Direction::NorthEast => 9,
+            Direction::SouthEast => -7,
+        }
+    }
+
+    #[inline(always)]
+    pub const fn translate(self, bb: Bitboard) -> Bitboard {
+        Bitboard(match self {
+            Direction::North => bb.0 << 8,
+            Direction::South => bb.0 >> 8,
+            Direction::NorthWest => (bb.0 & !FILE_A) << 7,
+            Direction::SouthWest => (bb.0 & !FILE_A) >> 9,
+            Direction::NorthEast => (bb.0 << 9) & !FILE_A,
+            Direction::SouthEast => (bb.0 >> 7) & !FILE_A,
+        })
     }
 }

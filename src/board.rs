@@ -13,42 +13,16 @@ pub struct Board {
 
     pub side: Color,
     pub epsq: Option<Square>,
-    pub castle: (bool, bool, bool, bool),
+    pub castle: u8,
 
-    pub history: Array<Undo, 2048>,
+    pub undos: Array<Undo, 2048>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Undo {
     pub m: Move,
     pub epsq: Option<Square>,
-}
-
-impl Default for Board {
-    fn default() -> Self {
-        let bitboards = [
-            [
-                // white
-                Bitboard(0xff00),
-                Bitboard(0x42),
-                Bitboard(0x24),
-                Bitboard(0x81),
-                Bitboard(0x8),
-                Bitboard(0x10),
-            ],
-            [
-                //black
-                Bitboard(0xff000000000000),
-                Bitboard(0x4200000000000000),
-                Bitboard(0x2400000000000000),
-                Bitboard(0x8100000000000000),
-                Bitboard(0x800000000000000),
-                Bitboard(0x1000000000000000),
-            ],
-        ];
-
-        todo!()
-    }
+    pub castle: u8,
 }
 
 impl Board {
@@ -90,7 +64,7 @@ impl Board {
                 Color::White
             };
 
-            let sq = Square::new(y as u32 * 8 + x as u32);
+            let sq = Square::from_coords(x, y);
             this.bitboards[color][role] |= 1 << sq as u8;
             this.occupancy[color] |= this.bitboards[color][role];
             this.squares[sq] = Some(Piece::new(color, role));
@@ -110,20 +84,25 @@ impl Board {
 
         this.epsq = None;
 
-        this.castle = (true, true, true, true);
+        this.castle = 0b1111;
 
         Some(this)
+    }
+
+    #[inline(always)]
+    pub fn occupied(&self) -> Bitboard {
+        self.occupancy[Color::White] | self.occupancy[Color::Black]
     }
 
     pub fn check(&self) {
         for (color, role) in Piece::ALL {
             for sq in self.bitboards[color][role] {
-                assert_eq!(self.squares[sq], Some(Piece::new(color, role)));
+                assert_eq!(self.squares[sq], Some(Piece::new(color, role)), "{sq}");
                 assert!(self.occupancy[color].contains(sq));
             }
         }
 
-        let occupied = self.occupancy[Color::White] | self.occupancy[Color::Black];
+        let occupied = self.occupied();
         for sq in (0..64).map(Square::new) {
             if let Some(p) = self.squares[sq] {
                 assert!(self.bitboards[p].contains(sq));
@@ -150,9 +129,35 @@ impl Board {
     }
 
     #[inline(always)]
-    pub fn take(&mut self) {
-        crate::make::take(self)
+    pub fn unmake(&mut self) {
+        crate::make::unmake(self)
     }
+}
+
+/// White king side castle
+pub const WKSC: u8 = 0b0001;
+/// White queen side castle
+pub const WQSC: u8 = 0b0010;
+/// Black king side castle
+pub const BKSC: u8 = 0b0100;
+/// Black queen side castle
+pub const BQSC: u8 = 0b1000;
+
+#[rustfmt::skip]
+const CASTLING_RIGHTS: [u8; 64] = [
+    13, 15, 15, 15, 12, 15, 15, 14,
+    15, 15, 15, 15, 15, 15, 15, 15,
+    15, 15, 15, 15, 15, 15, 15, 15,
+    15, 15, 15, 15, 15, 15, 15, 15,
+    15, 15, 15, 15, 15, 15, 15, 15,
+    15, 15, 15, 15, 15, 15, 15, 15,
+    15, 15, 15, 15, 15, 15, 15, 15,
+     7, 15, 15, 15,  3, 15, 15, 11,
+];
+
+#[inline(always)]
+pub const fn castle_mask(sq: Square) -> u8 {
+    CASTLING_RIGHTS[sq as usize]
 }
 
 impl std::fmt::Display for Board {
@@ -239,7 +244,7 @@ impl<T> IndexMut<Square> for BySquare<T> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 #[repr(u8)]
 pub enum Color {
     Black = 0,
@@ -255,8 +260,8 @@ impl Color {
     }
 
     #[inline(always)]
-    pub fn is_white(self) -> bool {
-        self == Color::White
+    pub const fn is_white(self) -> bool {
+        self as u8 & 1 != 0
     }
 
     #[inline(always)]
@@ -265,6 +270,36 @@ impl Color {
             Color::White => white,
             Color::Black => black,
         }
+    }
+
+    #[inline(always)]
+    pub const fn pawn(self) -> Piece {
+        Piece::new(self, Role::Pawn)
+    }
+
+    #[inline(always)]
+    pub const fn knight(self) -> Piece {
+        Piece::new(self, Role::Knight)
+    }
+
+    #[inline(always)]
+    pub const fn bishop(self) -> Piece {
+        Piece::new(self, Role::Bishop)
+    }
+
+    #[inline(always)]
+    pub const fn rook(self) -> Piece {
+        Piece::new(self, Role::Rook)
+    }
+
+    #[inline(always)]
+    pub const fn queen(self) -> Piece {
+        Piece::new(self, Role::Queen)
+    }
+
+    #[inline(always)]
+    pub const fn king(self) -> Piece {
+        Piece::new(self, Role::King)
     }
 }
 
@@ -279,18 +314,18 @@ impl std::ops::Not for Color {
 #[derive(Debug)]
 pub struct ByColor<T>([T; 2]);
 
-impl<T> IndexMut<Color> for ByColor<T> {
-    #[inline(always)]
-    fn index_mut(&mut self, color: Color) -> &mut Self::Output {
-        &mut self.0[color as usize]
-    }
-}
-
 impl<T> Index<Color> for ByColor<T> {
     type Output = T;
     #[inline(always)]
     fn index(&self, color: Color) -> &Self::Output {
         &self.0[color as usize]
+    }
+}
+
+impl<T> IndexMut<Color> for ByColor<T> {
+    #[inline(always)]
+    fn index_mut(&mut self, color: Color) -> &mut Self::Output {
+        &mut self.0[color as usize]
     }
 }
 
@@ -449,3 +484,30 @@ pub const ALGEBRAIC: BySquare<&'static str> = BySquare([
     "a7", "b7", "c7", "d7", "e7", "f7", "g7", "h7",
     "a8", "b8", "c8", "d8", "e8", "f8", "g8", "h8",
 ]);
+
+// impl Default for Board {
+//     fn default() -> Self {
+//         let bitboards = [
+//             [
+//                 // white
+//                 Bitboard(0xff00),
+//                 Bitboard(0x42),
+//                 Bitboard(0x24),
+//                 Bitboard(0x81),
+//                 Bitboard(0x8),
+//                 Bitboard(0x10),
+//             ],
+//             [
+//                 //black
+//                 Bitboard(0xff000000000000),
+//                 Bitboard(0x4200000000000000),
+//                 Bitboard(0x2400000000000000),
+//                 Bitboard(0x8100000000000000),
+//                 Bitboard(0x800000000000000),
+//                 Bitboard(0x1000000000000000),
+//             ],
+//         ];
+//
+//         todo!()
+//     }
+// }

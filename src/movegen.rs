@@ -1,14 +1,12 @@
 use crate::attacks::{bishop_attacks, king_attacks, knight_attacks, pawn_attacks, rook_attacks};
 use crate::bitboard::Bitboard;
-use crate::board::Color;
 use crate::board::{
-    Board,
-    Color::*,
+    BKSC, BQSC, Board,
+    Color::{self, *},
     Piece,
     Role::{self, *},
-    Square,
+    Square, WKSC, WQSC,
 };
-use crate::make::is_attacked;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Move {
@@ -32,10 +30,7 @@ pub enum Kind {
 const RANK_1: u64 = 0xff;
 const RANK_2: u64 = 0xff00;
 const RANK_3: u64 = 0xff0000;
-const RANK_4: u64 = 0xff000000;
-const RANK_5: u64 = 0xff00000000;
 const RANK_6: u64 = 0xff0000000000;
-const RANK_7: u64 = 0xff000000000000;
 const RANK_8: u64 = 0xff00000000000000;
 
 #[inline]
@@ -43,7 +38,7 @@ pub(crate) fn generate(b: &Board) -> Array<Move, 256> {
     let mut moves = Array::new();
 
     let not_us = !b.occupancy[b.side]; // empty | enemy
-    let occupied = b.occupancy[White] | b.occupancy[Black];
+    let occupied = b.occupied();
 
     gen_pawn_moves(b, &mut moves, occupied);
 
@@ -54,7 +49,7 @@ pub(crate) fn generate(b: &Board) -> Array<Move, 256> {
             moves.push(Move {
                 src,
                 dst,
-                mov: Piece::new(b.side, Knight),
+                mov: b.side.knight(),
                 cap: b.squares[dst],
                 promo: None,
                 kind: Kind::Normal,
@@ -69,7 +64,7 @@ pub(crate) fn generate(b: &Board) -> Array<Move, 256> {
             moves.push(Move {
                 src,
                 dst,
-                mov: Piece::new(b.side, Bishop),
+                mov: b.side.bishop(),
                 cap: b.squares[dst],
                 promo: None,
                 kind: Kind::Normal,
@@ -84,7 +79,7 @@ pub(crate) fn generate(b: &Board) -> Array<Move, 256> {
             moves.push(Move {
                 src,
                 dst,
-                mov: Piece::new(b.side, Rook),
+                mov: b.side.rook(),
                 cap: b.squares[dst],
                 promo: None,
                 kind: Kind::Normal,
@@ -100,7 +95,7 @@ pub(crate) fn generate(b: &Board) -> Array<Move, 256> {
             moves.push(Move {
                 src,
                 dst,
-                mov: Piece::new(b.side, Queen),
+                mov: b.side.queen(),
                 cap: b.squares[dst],
                 promo: None,
                 kind: Kind::Normal,
@@ -115,7 +110,7 @@ pub(crate) fn generate(b: &Board) -> Array<Move, 256> {
         moves.push(Move {
             src,
             dst,
-            mov: Piece::new(b.side, King),
+            mov: b.side.king(),
             cap: b.squares[dst],
             promo: None,
             kind: Kind::Normal,
@@ -123,81 +118,70 @@ pub(crate) fn generate(b: &Board) -> Array<Move, 256> {
     }
 
     if b.side.is_white() {
-        // use mask to check if squares between king and rook are empty and not attacked
-        // let king_side_squares = Bitboard::from(Square::F1) | Bitboard::from(Square::G1);
-        // if b.castle.0
-        //     && (king_side_squares & occupied).is_empty()
-        //     && !is_attacked(b, Square::F1, Black)
-        //     && !is_attacked(b, Square::G1, Black)
-        // {
-        //     moves.push(Move {
-        //         src: Square::E1,
-        //         dst: Square::G1,
-        //         mov: Piece::new(White, King),
-        //         cap: None,
-        //         promo: None,
-        //         kind: Kind::Castle,
-        //     })
-        // }
+        const OO: Bitboard = Bitboard::from_squares([Square::F1, Square::G1]);
+        const OOO: Bitboard = Bitboard::from_squares([Square::D1, Square::C1, Square::B1]);
 
-        if b.castle.0
-            && b.squares[Square::F1].is_none()
-            && b.squares[Square::G1].is_none()
+        if b.castle & WKSC != 0
+            && (occupied & OO).is_empty()
+            && !is_attacked(b, Square::E1, Black)
             && !is_attacked(b, Square::F1, Black)
             && !is_attacked(b, Square::G1, Black)
         {
             moves.push(Move {
                 src: Square::E1,
                 dst: Square::G1,
-                mov: Piece::new(White, King),
+                mov: White.king(),
                 cap: None,
                 promo: None,
                 kind: Kind::Castle,
             })
         }
-        if b.castle.1
-            && b.squares[Square::D1].is_none()
-            && b.squares[Square::C1].is_none()
-            && b.squares[Square::B1].is_none()
+
+        if b.castle & WQSC != 0
+            && (occupied & OOO).is_empty()
+            && !is_attacked(b, Square::E1, Black)
             && !is_attacked(b, Square::D1, Black)
             && !is_attacked(b, Square::C1, Black)
         {
             moves.push(Move {
                 src: Square::E1,
                 dst: Square::C1,
-                mov: Piece::new(White, King),
+                mov: White.king(),
                 cap: None,
                 promo: None,
                 kind: Kind::Castle,
             })
         }
     } else {
-        if b.castle.2
-            && b.squares[Square::F8].is_none()
-            && b.squares[Square::G8].is_none()
+        const OO: Bitboard = Bitboard::from_squares([Square::F8, Square::G8]);
+        const OOO: Bitboard = Bitboard::from_squares([Square::D8, Square::C8, Square::B8]);
+
+        if b.castle & BKSC != 0
+            && (occupied & OO).is_empty()
+            && !is_attacked(b, Square::E8, White)
             && !is_attacked(b, Square::F8, White)
             && !is_attacked(b, Square::G8, White)
         {
             moves.push(Move {
                 src: Square::E8,
                 dst: Square::G8,
-                mov: Piece::new(Black, King),
+                mov: Black.king(),
                 cap: None,
                 promo: None,
                 kind: Kind::Castle,
             })
         }
-        if b.castle.3
-            && b.squares[Square::D8].is_none()
-            && b.squares[Square::C8].is_none()
-            && b.squares[Square::B8].is_none()
+
+        if b.castle & BQSC != 0
+            && (occupied & OOO).is_empty()
+            && !is_attacked(b, Square::E8, White)
             && !is_attacked(b, Square::D8, White)
             && !is_attacked(b, Square::C8, White)
         {
             moves.push(Move {
                 src: Square::E8,
                 dst: Square::C8,
-                mov: Piece::new(Black, King),
+                mov: Black.king(),
                 cap: None,
                 promo: None,
                 kind: Kind::Castle,
@@ -222,7 +206,7 @@ pub fn gen_pawn_moves(b: &Board, moves: &mut Array<Move, 256>, occupied: Bitboar
             moves.push(Move {
                 src,
                 dst,
-                mov: Piece::new(side, Pawn),
+                mov: side.pawn(),
                 cap,
                 promo: Some(role),
                 kind: Kind::Normal,
@@ -243,7 +227,7 @@ pub fn gen_pawn_moves(b: &Board, moves: &mut Array<Move, 256>, occupied: Bitboar
         moves.push(Move {
             src,
             dst,
-            mov: Piece::new(b.side, Pawn),
+            mov: side.pawn(),
             cap: None,
             promo: None,
             kind: Kind::Normal,
@@ -261,7 +245,7 @@ pub fn gen_pawn_moves(b: &Board, moves: &mut Array<Move, 256>, occupied: Bitboar
         moves.push(Move {
             src,
             dst,
-            mov: Piece::new(side, Pawn),
+            mov: side.pawn(),
             cap: None,
             promo: None,
             kind: Kind::DoublePush,
@@ -276,7 +260,7 @@ pub fn gen_pawn_moves(b: &Board, moves: &mut Array<Move, 256>, occupied: Bitboar
         moves.push(Move {
             src,
             dst,
-            mov: Piece::new(side, Pawn),
+            mov: side.pawn(),
             cap: b.squares[dst],
             promo: None,
             kind: Kind::Normal,
@@ -296,7 +280,7 @@ pub fn gen_pawn_moves(b: &Board, moves: &mut Array<Move, 256>, occupied: Bitboar
         moves.push(Move {
             src,
             dst,
-            mov: Piece::new(side, Pawn),
+            mov: side.pawn(),
             cap: b.squares[dst],
             promo: None,
             kind: Kind::Normal,
@@ -314,13 +298,35 @@ pub fn gen_pawn_moves(b: &Board, moves: &mut Array<Move, 256>, occupied: Bitboar
             moves.push(Move {
                 src,
                 dst: epsq,
-                mov: Piece::new(side, Pawn),
-                cap: Some(Piece::new(!side, Pawn)),
+                mov: side.pawn(),
+                cap: Some(side.other().pawn()),
                 promo: None,
                 kind: Kind::EnPassant,
             })
         }
     }
+}
+
+#[rustfmt::skip]
+pub fn is_attacked(b: &Board, sq: Square, by_side: Color) -> bool {
+    let pawns = b.bitboards[by_side][Pawn];
+    if (pawn_attacks(!by_side, sq) & pawns).any() { return true; }
+
+    let knights = b.bitboards[by_side][Knight];
+    if (knight_attacks(sq) & knights).any() { return true; }
+
+    let king = b.bitboards[by_side][King];
+    if (king_attacks(sq) & king).any() { return true; }
+
+    let occupied = b.occupied();
+
+    let bishops_queens = b.bitboards[by_side][Bishop] | b.bitboards[by_side][Queen];
+    if (bishop_attacks(sq, occupied) & bishops_queens).any() { return true; }
+
+    let rooks_queens = b.bitboards[by_side][Rook] | b.bitboards[by_side][Queen];
+    if (rook_attacks(sq, occupied) & rooks_queens).any() { return true; }
+
+    false
 }
 
 #[derive(Copy, Clone)]
@@ -374,7 +380,7 @@ pub struct Array<T, const N: usize> {
     count: usize,
 }
 
-impl<T, const N: usize> Array<T, N> {
+impl<T: Copy, const N: usize> Array<T, N> {
     #[inline]
     pub fn new() -> Self {
         Self {

@@ -14,19 +14,30 @@ impl Bitboard {
     }
 
     #[inline(always)]
-    pub const fn setbit(&mut self, sq: Square) {
+    pub const fn from_squares<const N: usize>(squares: [Square; N]) -> Self {
+        let mut i = 0;
+        let mut bits = 0u64;
+        while i < N {
+            bits |= 1 << squares[i] as u8;
+            i += 1;
+        }
+        Bitboard(bits)
+    }
+
+    #[inline(always)]
+    pub const fn insert(&mut self, sq: Square) {
         self.0 |= 1 << sq as u8;
     }
 
     #[inline(always)]
-    pub const fn clrbit(&mut self, sq: Square) {
+    pub const fn remove(&mut self, sq: Square) {
         self.0 &= !(1 << sq as u8);
     }
 
     #[inline(always)]
-    pub const fn movbit(&mut self, src: Square, dst: Square) {
-        self.clrbit(src);
-        self.setbit(dst);
+    pub const fn replace(&mut self, src: Square, dst: Square) {
+        self.remove(src);
+        self.insert(dst);
     }
 
     #[inline(always)]

@@ -1,14 +1,16 @@
-use crate::{
-    attacks::{bishop_attacks, king_attacks, knight_attacks, pawn_attacks, rook_attacks},
-    board::{Board, Color, Piece, Role::*, Square, Undo},
-    movegen::{Kind, Move},
-};
+use crate::board::{Board, Color::*, Piece, Role::*, Square, Undo, castle_mask};
+use crate::movegen::{Kind, Move, is_attacked};
 
+#[inline]
 pub fn make(b: &mut Board, m: Move) -> bool {
-    b.history.push(Undo { m, epsq: b.epsq });
+    b.undos.push(Undo {
+        m,
+        epsq: b.epsq,
+        castle: b.castle,
+    });
 
-    b.bitboards[m.mov].movbit(m.src, m.dst);
-    b.occupancy[b.side].movbit(m.src, m.dst);
+    b.bitboards[m.mov].replace(m.src, m.dst);
+    b.occupancy[b.side].replace(m.src, m.dst);
 
     b.squares[m.src] = None;
     b.squares[m.dst] = Some(m.mov);
@@ -18,12 +20,12 @@ pub fn make(b: &mut Board, m: Move) -> bool {
     match m.kind {
         Kind::Normal => {
             if let Some(cap) = m.cap {
-                b.bitboards[cap].clrbit(m.dst);
-                b.occupancy[!b.side].clrbit(m.dst);
+                b.bitboards[cap].remove(m.dst);
+                b.occupancy[!b.side].remove(m.dst);
             }
             if let Some(role) = m.promo {
-                b.bitboards[m.mov].clrbit(m.dst);
-                b.bitboards[b.side][role].setbit(m.dst);
+                b.bitboards[m.mov].remove(m.dst);
+                b.bitboards[b.side][role].insert(m.dst);
                 b.squares[m.dst] = Some(Piece::new(b.side, role));
             }
         }
@@ -32,77 +34,96 @@ pub fn make(b: &mut Board, m: Move) -> bool {
         }
         Kind::EnPassant => {
             let sq = m.dst.offset(b.side.fold(-8, 8));
-            b.bitboards[!b.side][Pawn].clrbit(sq);
-            b.occupancy[!b.side].clrbit(sq);
+            b.bitboards[!b.side][Pawn].remove(sq);
+            b.occupancy[!b.side].remove(sq);
             b.squares[sq] = None;
         }
-        Kind::Castle => todo!(),
+        Kind::Castle => match m.dst {
+            Square::G1 => move_piece(b, Square::H1, Square::F1, White.rook()),
+            Square::C1 => move_piece(b, Square::A1, Square::D1, White.rook()),
+            Square::G8 => move_piece(b, Square::H8, Square::F8, Black.rook()),
+            Square::C8 => move_piece(b, Square::A8, Square::D8, Black.rook()),
+            _ => unreachable!(),
+        },
     }
 
     let king_sq = b.bitboards[b.side][King].first().unwrap();
-    let king_attacked = is_attacked(b, king_sq, !b.side);
+    let in_check = is_attacked(b, king_sq, !b.side);
 
     b.side = !b.side;
+    b.castle &= castle_mask(m.src) & castle_mask(m.dst);
 
-    !king_attacked
+    if in_check {
+        unmake(b);
+        return false;
+    }
+
+    true
 }
 
-pub fn take(b: &mut Board) {
-    let Undo { m, epsq } = b.history.pop().unwrap();
+#[inline]
+pub fn unmake(b: &mut Board) {
+    let Undo { m, epsq, castle } = b.undos.pop().unwrap();
     b.epsq = epsq;
+    b.castle = castle;
 
     b.side = !b.side;
 
-    b.bitboards[m.mov].clrbit(m.dst);
-    b.bitboards[m.mov].setbit(m.src);
+    b.bitboards[m.mov].replace(m.dst, m.src);
+    b.occupancy[b.side].replace(m.dst, m.src);
 
-    b.occupancy[b.side].clrbit(m.dst);
-    b.occupancy[b.side].setbit(m.src);
-
-    b.squares[m.dst] = None;
     b.squares[m.src] = Some(m.mov);
+    b.squares[m.dst] = None;
 
     match m.kind {
         Kind::Normal => {
             if let Some(cap) = m.cap {
-                b.bitboards[cap].setbit(m.dst);
-                b.occupancy[!b.side].setbit(m.dst);
+                b.bitboards[cap].insert(m.dst);
+                b.occupancy[!b.side].insert(m.dst);
                 b.squares[m.dst] = Some(cap);
             }
             if let Some(role) = m.promo {
-                b.bitboards[m.mov].setbit(m.src);
-                b.bitboards[b.side][role].clrbit(m.dst);
+                b.bitboards[m.mov].insert(m.src);
+                b.bitboards[b.side][role].remove(m.dst);
             }
         }
         Kind::DoublePush => {}
         Kind::EnPassant => {
             let sq = m.dst.offset(b.side.fold(-8, 8));
-            b.bitboards[!b.side][Pawn].setbit(sq);
-            b.occupancy[!b.side].setbit(sq);
+            b.bitboards[!b.side][Pawn].insert(sq);
+            b.occupancy[!b.side].insert(sq);
             b.squares[sq] = Some(Piece::new(!b.side, Pawn));
         }
-        Kind::Castle => todo!(),
+        Kind::Castle => match m.dst {
+            Square::G1 => move_piece(b, Square::F1, Square::H1, White.rook()),
+            Square::C1 => move_piece(b, Square::D1, Square::A1, White.rook()),
+            Square::G8 => move_piece(b, Square::F8, Square::H8, Black.rook()),
+            Square::C8 => move_piece(b, Square::D8, Square::A8, Black.rook()),
+            _ => unreachable!(),
+        },
     }
 }
 
-#[rustfmt::skip]
-pub fn is_attacked(b: &Board, sq: Square, by_side: Color) -> bool {
-    let pawns = b.bitboards[by_side][Pawn];
-    if (pawn_attacks(!by_side, sq) & pawns).any() { return true; }
+#[inline(always)]
+fn move_piece(b: &mut Board, src: Square, dst: Square, p: Piece) {
+    b.bitboards[p].replace(src, dst);
+    b.occupancy[p.color()].replace(src, dst);
 
-    let knights = b.bitboards[by_side][Knight];
-    if (knight_attacks(sq) & knights).any() { return true; }
+    b.squares[src] = None;
+    b.squares[dst] = Some(p);
+}
 
-    let king = b.bitboards[by_side][King];
-    if (king_attacks(sq) & king).any() { return true; }
+#[inline(always)]
+pub fn remove_piece(b: &mut Board, sq: Square, p: Piece) {
+    b.bitboards[p].remove(sq);
+    b.occupancy[p.color()].remove(sq);
 
-    let occupied = b.occupancy[Color::White] | b.occupancy[Color::Black];
+    b.squares[sq] = None;
+}
 
-    let bishops_queens = b.bitboards[by_side][Bishop] | b.bitboards[by_side][Queen];
-    if (bishop_attacks(sq, occupied) & bishops_queens).any() { return true; }
+pub fn put_piece(b: &mut Board, sq: Square, p: Piece) {
+    b.bitboards[p].insert(sq);
+    b.occupancy[p.color()].insert(sq);
 
-    let rooks_queens = b.bitboards[by_side][Rook] | b.bitboards[by_side][Queen];
-    if (rook_attacks(sq, occupied) & rooks_queens).any() { return true; }
-
-    false
+    b.squares[sq] = Some(p);
 }

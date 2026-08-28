@@ -1,28 +1,25 @@
 use std::io;
 use std::time::Instant;
 
-use dobyrs::board::Board;
-use dobyrs::perft::perft;
+use doby::board::{Board, Piece};
+use doby::perft;
 
 const START_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+const KIWIPETE_FEN: &str = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq";
 
 fn main() -> io::Result<()> {
     let mut board = Board::from_fen(START_FEN).unwrap();
 
-    let depth = 6;
-    let mut total = 0;
-    let start = Instant::now();
-
-    for m in board.generate() {
-        if board.make(m) {
-            let leafs = perft(&mut board, depth - 1);
-            println!("{}{}: {}", m.src, m.dst, leafs);
-            total += leafs;
-        }
-        board.take();
+    for depth in 1..=6 {
+        let start = Instant::now();
+        let total = perft::divide(&mut board, depth);
+        println!("Depth {depth}: {total} nodes in {:?}", start.elapsed());
     }
 
-    println!("\nSearched {total} nodes in {:?}", start.elapsed());
+    // let depth = 1;
+    // let start = Instant::now();
+    // let total = perft::divide(&mut board, depth);
+    // println!("\nSearched {total} nodes in {:?}", start.elapsed());
 
     // let mut board = Board::from_fen(START_FEN).unwrap();
 

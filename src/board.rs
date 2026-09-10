@@ -5,6 +5,9 @@ use std::ops::{Index, IndexMut};
 use crate::bitboard::Bitboard;
 use crate::movegen::{Array, Move};
 
+use Color::*;
+use Role::*;
+
 #[derive(Debug)]
 pub struct Board {
     pub bitboards: ByPiece<Bitboard>,
@@ -15,6 +18,10 @@ pub struct Board {
     pub epsq: Option<Square>,
     pub castle: u8,
 
+    pub halfmoves_clock: u32,
+    pub fullmoves_count: u32,
+    pub key: crate::zobrist::Key,
+
     pub undos: Array<Undo, 2048>,
 }
 
@@ -23,6 +30,9 @@ pub struct Undo {
     pub m: Move,
     pub epsq: Option<Square>,
     pub castle: u8,
+    pub halfmoves_clock: u32,
+    pub fullmoves_count: u32,
+    pub key: crate::zobrist::Key,
 }
 
 impl Board {
@@ -48,26 +58,13 @@ impl Board {
                 continue;
             }
 
-            let role = match ch.to_ascii_lowercase() {
-                b'k' => Role::King,
-                b'q' => Role::Queen,
-                b'b' => Role::Bishop,
-                b'n' => Role::Knight,
-                b'r' => Role::Rook,
-                b'p' => Role::Pawn,
-                _ => return None,
-            };
-
-            let color = if ch.is_ascii_lowercase() {
-                Color::Black
-            } else {
-                Color::White
-            };
+            let color = if ch & 32 == 0 { White } else { Black };
+            let role = Role::from_char(ch as char)?;
 
             let sq = Square::from_coords(x, y);
-            this.bitboards[color][role] |= 1 << sq as u8;
+            this.bitboards[color][role].insert(sq);
             this.occupancy[color] |= this.bitboards[color][role];
-            this.squares[sq] = Some(Piece::new(color, role));
+            this.squares[sq] = Some(role.of(color));
 
             x += 1;
         }
@@ -76,11 +73,7 @@ impl Board {
             return None;
         }
 
-        this.side = match parts.next()?.get(0) {
-            Some(b'w') => Color::White,
-            Some(b'b') => Color::Black,
-            _ => return None,
-        };
+        this.side = Color::from_char(*parts.next()?.get(0)? as char)?;
 
         let castling_rights = parts.next()?;
         if castling_rights.len() > 4 {
@@ -109,6 +102,8 @@ impl Board {
             let y = epsq[1] - b'1';
             this.epsq = Some(Square::from_coords(x, y));
         }
+
+        this.key = crate::zobrist::hash(&this);
 
         Some(this)
     }
@@ -140,6 +135,7 @@ impl Board {
 
         assert_eq!(self.bitboards[Color::White][Role::King].count(), 1);
         assert_eq!(self.bitboards[Color::Black][Role::King].count(), 1);
+        assert_eq!(self.key, crate::zobrist::hash(self));
     }
 
     #[inline(always)]
@@ -212,6 +208,7 @@ impl std::fmt::Display for Board {
         writeln!(f, "side: {:?}", self.side)?;
         writeln!(f, "epsq: {:?}", self.epsq)?;
         writeln!(f, "castle: {:b}", self.castle)?;
+        writeln!(f, "key: {:016x}", self.key)?;
         Ok(())
     }
 }
@@ -252,7 +249,7 @@ impl Square {
 
     #[inline(always)]
     pub const fn mirror(self) -> Square {
-        unsafe { transmute(self as u8 ^ 54) }
+        unsafe { transmute(self as u8 ^ 56) }
     }
 }
 
@@ -280,7 +277,7 @@ impl<T> IndexMut<Square> for BySquare<T> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Color {
     Black = 0,
@@ -289,6 +286,14 @@ pub enum Color {
 
 impl Color {
     pub const ALL: [Color; 2] = [Color::Black, Color::White];
+
+    pub const fn from_char(ch: char) -> Option<Color> {
+        match ch {
+            'w' => Some(Color::White),
+            'b' => Some(Color::Black),
+            _ => None,
+        }
+    }
 
     #[inline(always)]
     pub fn other(self) -> Color {
@@ -365,7 +370,7 @@ impl<T> IndexMut<Color> for ByColor<T> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Role {
     Pawn,
@@ -386,7 +391,7 @@ impl Role {
         Role::King,
     ];
 
-    pub const fn char(self) -> char {
+    pub const fn to_char(self) -> char {
         match self {
             Role::Pawn => 'p',
             Role::Knight => 'n',
@@ -395,6 +400,23 @@ impl Role {
             Role::Queen => 'q',
             Role::King => 'k',
         }
+    }
+
+    pub const fn from_char(ch: char) -> Option<Role> {
+        match ch {
+            'P' | 'p' => Some(Role::Pawn),
+            'N' | 'n' => Some(Role::Knight),
+            'B' | 'b' => Some(Role::Bishop),
+            'R' | 'r' => Some(Role::Rook),
+            'Q' | 'q' => Some(Role::Queen),
+            'K' | 'k' => Some(Role::King),
+            _ => None,
+        }
+    }
+
+    #[inline(always)]
+    pub const fn of(self, color: Color) -> Piece {
+        Piece::new(color, self)
     }
 }
 
@@ -428,6 +450,13 @@ impl Piece {
         Piece(color as u8 | (role as u8) << 1)
     }
 
+    pub const fn from_char(ch: char) -> Option<Self> {
+        let Some(role) = Role::from_char(ch) else {
+            return None;
+        };
+        Some(role.of(if ch as u8 & 32 == 0 { White } else { Black }))
+    }
+
     #[inline(always)]
     pub const fn color(self) -> Color {
         unsafe { transmute(self.0 & 1) }
@@ -444,7 +473,7 @@ impl Piece {
     }
 
     pub const fn char(self) -> char {
-        let ch = self.role().char();
+        let ch = self.role().to_char();
         match self.color() {
             Color::Black => ch,
             Color::White => ch.to_ascii_uppercase(),
@@ -521,32 +550,54 @@ pub const ALGEBRAIC: BySquare<&'static str> = BySquare([
     "a8", "b8", "c8", "d8", "e8", "f8", "g8", "h8",
 ]);
 
-// impl Default for Board {
-//     fn default() -> Self {
-//         let bitboards = ByColor([
-//             ByRole([
-//                 Bitboard(0xff000000000000),
-//                 Bitboard(0x4200000000000000),
-//                 Bitboard(0x2400000000000000),
-//                 Bitboard(0x8100000000000000),
-//                 Bitboard(0x800000000000000),
-//                 Bitboard(0x1000000000000000),
-//             ]),
-//             ByRole([
-//                 Bitboard(0xff00),
-//                 Bitboard(0x42),
-//                 Bitboard(0x24),
-//                 Bitboard(0x81),
-//                 Bitboard(0x8),
-//                 Bitboard(0x10),
-//             ]),
-//         ]);
-//
-//         let occupancy = [Bitboard(0xffff0000000000), Bitboard(0xff)];
-//
-//         Self {
-//             bitboards: ByPiece(bitboards),
-//             occupancy: ByColor(occupancy),
-//         }
-//     }
-// }
+impl Default for Board {
+    fn default() -> Self {
+        let bitboards = ByColor([
+            ByRole([
+                Bitboard(0xff000000000000),
+                Bitboard(0x4200000000000000),
+                Bitboard(0x2400000000000000),
+                Bitboard(0x8100000000000000),
+                Bitboard(0x800000000000000),
+                Bitboard(0x1000000000000000),
+            ]),
+            ByRole([
+                Bitboard(0xff00),
+                Bitboard(0x42),
+                Bitboard(0x24),
+                Bitboard(0x81),
+                Bitboard(0x8),
+                Bitboard(0x10),
+            ]),
+        ]);
+
+        let occupancy = [Bitboard(0xffff000000000000), Bitboard(0xffff)];
+
+        #[rustfmt::skip]
+        let squares = [
+            Some(White.rook()), Some(White.knight()), Some(White.bishop()), Some(White.queen()), Some(White.king()), Some(White.bishop()), Some(White.knight()), Some(White.rook()),
+            Some(White.pawn()), Some(White.pawn()),   Some(White.pawn()),   Some(White.pawn()),  Some(White.pawn()), Some(White.pawn()),   Some(White.pawn()),   Some(White.pawn()),
+            None, None, None, None, None, None, None, None,
+            None, None, None, None, None, None, None, None,
+            None, None, None, None, None, None, None, None,
+            None, None, None, None, None, None, None, None,
+            Some(Black.pawn()), Some(Black.pawn()),   Some(Black.pawn()),   Some(Black.pawn()),  Some(Black.pawn()), Some(Black.pawn()),   Some(Black.pawn()),   Some(Black.pawn()),
+            Some(Black.rook()), Some(Black.knight()), Some(Black.bishop()), Some(Black.queen()), Some(Black.king()), Some(Black.bishop()), Some(Black.knight()), Some(Black.rook()),
+        ];
+
+        let mut board = Self {
+            bitboards: ByPiece(bitboards),
+            occupancy: ByColor(occupancy),
+            squares: BySquare(squares),
+            side: Color::White,
+            epsq: None,
+            castle: WKSC | WQSC | BKSC | BQSC,
+            halfmoves_clock: 0,
+            fullmoves_count: 1,
+            key: 0,
+            undos: Array::new(),
+        };
+        board.key = crate::zobrist::hash(&board);
+        board
+    }
+}

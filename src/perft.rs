@@ -31,7 +31,7 @@ pub fn divide(b: &mut Board, depth: u32) -> u64 {
         }
 
         let leafs = perft(b, depth - 1);
-        println!("{}{}: {}", m.src, m.dst, leafs);
+        println!("{m}: {leafs}");
         total += leafs;
         b.unmake();
 
@@ -49,7 +49,7 @@ mod tests {
     // https://chessprogramming.org/Perft_Results
     // Might want to run tests in `release` mode to avoid `board.check()` overhead.
 
-    macro_rules! perft_test {
+    macro_rules! perft {
         ($name:ident, $fen:expr, $($depth:expr => $expected:expr),* $(,)?) => {
             #[test]
             fn $name() {
@@ -61,7 +61,7 @@ mod tests {
         };
     }
 
-    perft_test!(startpos, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+    perft!(startpos, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
         1 => 20,
         2 => 400,
         3 => 8_902,
@@ -70,7 +70,7 @@ mod tests {
         6 => 119_060_324,
     );
 
-    perft_test!(kiwipete, "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+    perft!(kiwipete, "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
         1 => 48,
         2 => 2_039,
         3 => 97_862,

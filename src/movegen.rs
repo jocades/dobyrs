@@ -409,3 +409,14 @@ impl<T, const N: usize> IntoIterator for Array<T, N> {
         }
     }
 }
+
+impl std::fmt::Display for Move {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use std::fmt::Write;
+        write!(f, "{}{}", self.src, self.dst)?;
+        if let Some(role) = self.promo {
+            f.write_char(role.to_char())?;
+        }
+        Ok(())
+    }
+}
